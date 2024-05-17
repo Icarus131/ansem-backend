@@ -17,7 +17,8 @@ db.serialize(() => {
         tokens INTEGER,
         punches INTEGER,
         referredBy TEXT,
-        characterName TEXT
+        characterName TEXT,
+        win INTEGER DEFAULT 0
     )`);
 });
 
@@ -80,6 +81,67 @@ app.post("/api/wallet", (req, res) => {
       },
     );
   });
+});
+
+app.post("/api/finish", (req, res) => {
+  const { wallet_address, win } = req.body;
+
+  if (!wallet_address || typeof win !== "number") {
+    return res.status(400).json({ error: "Invalid request data" });
+  }
+
+  db.get(
+    "SELECT * FROM wallet_data WHERE wallet_address = ?",
+    [wallet_address],
+    (err, row) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+
+      if (row) {
+        db.run(
+          `UPDATE wallet_data SET win = win + ? WHERE wallet_address = ?`,
+          [win, wallet_address],
+          (err) => {
+            if (err) {
+              res.status(500).json({ error: err.message });
+              return;
+            }
+            res.json({ message: "Win count updated successfully" });
+          },
+        );
+      } else {
+        db.run(
+          `INSERT INTO wallet_data (wallet_address, tokens, punches, referredBy, characterName, win) VALUES (?, ?, ?, ?, ?, ?)`,
+          [wallet_address, 0, 0, "", "", win],
+          (err) => {
+            if (err) {
+              res.status(500).json({ error: err.message });
+              return;
+            }
+            res.json({
+              message:
+                "Wallet data inserted and win count updated successfully",
+            });
+          },
+        );
+      }
+    },
+  );
+});
+
+app.get("/api/leaderboard", (req, res) => {
+  db.all(
+    "SELECT * FROM wallet_data ORDER BY win DESC LIMIT 10",
+    (err, rows) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      res.json(rows);
+    },
+  );
 });
 
 app.listen(PORT, () => {
