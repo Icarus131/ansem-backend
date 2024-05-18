@@ -14,8 +14,9 @@ const db = new sqlite3.Database("./main.db");
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS wallet_data (
         wallet_address TEXT PRIMARY KEY,
-        tokens INTEGER,
-        punches INTEGER,
+        tokens INTEGER DEFAULT 0,
+        punches INTEGER DEFAULT 0,
+        bonusPunches INTEGER DEFAULT 0,
         referredBy TEXT,
         characterName TEXT,
         win INTEGER DEFAULT 0
@@ -59,9 +60,12 @@ app.post("/api/wallet", (req, res) => {
 
         if (row) {
           console.log("Updating wallet data for:", wallet_address);
+          const newTokens = parseInt(row.tokens) + parseInt(tokens);
+          const newPunches = parseInt(row.punches) + parseInt(punches);
+
           db.run(
             `UPDATE wallet_data SET tokens = ?, punches = ?, referredBy = ?, characterName = ? WHERE wallet_address = ?`,
-            [tokens, punches, referredBy, characterName, wallet_address],
+            [newTokens, newPunches, referredBy, characterName, wallet_address],
             (err) => {
               if (err) {
                 console.error("DB update error:", err);
@@ -72,7 +76,7 @@ app.post("/api/wallet", (req, res) => {
               res.json({ message: "Wallet data updated successfully" });
 
               if (referredBy) {
-                fundReferrer(referredBy);
+                fundReferrer(referredBy, punches, wallet_address);
               }
             },
           );
@@ -89,6 +93,10 @@ app.post("/api/wallet", (req, res) => {
               }
               console.log("Wallet data inserted successfully");
               res.json({ message: "Wallet data inserted successfully" });
+
+              if (referredBy) {
+                fundReferrer(referredBy, punches, wallet_address);
+              }
             },
           );
         }
@@ -179,8 +187,40 @@ app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-async function fundReferrer(referredBy) {
+app.post("/api/details", (req, res) => {
+  const { wallet_address } = req.body;
+
+  if (!wallet_address) {
+    return res.status(400).json({ error: "Wallet address is required" });
+  }
+
+  db.get(
+    "SELECT * FROM wallet_data WHERE wallet_address = ?",
+    [wallet_address],
+    (err, row) => {
+      if (err) {
+        console.error("DB get error:", err);
+        res.status(500).json({ error: err.message });
+        return;
+      }
+
+      if (row) {
+        console.log("Details found for wallet address:", wallet_address);
+        res.json(row);
+      } else {
+        console.log("No details found for wallet address:", wallet_address);
+        res
+          .status(404)
+          .json({ error: "No details found for this wallet address" });
+      }
+    },
+  );
+});
+
+async function fundReferrer(referredBy, punches, walletAddress) {
   try {
+    const referralPunches = Math.floor(parseInt(punches) * 0.1);
+
     db.get(
       "SELECT * FROM wallet_data WHERE wallet_address = ?",
       [referredBy],
@@ -189,41 +229,63 @@ async function fundReferrer(referredBy) {
           console.error("Error checking referredBy:", err);
           return;
         }
-        let referralPunches = 0;
+
         if (row) {
-          referralPunches = Math.floor(row.punches * 0.1);
-        }
-
-        console.log(
-          `Updating punches for referrer ${referredBy} by ${referralPunches}`,
-        );
-
-        db.run(
-          `UPDATE wallet_data SET punches = punches + ? WHERE wallet_address = ?`,
-          [referralPunches, referredBy],
-          (err) => {
-            if (err) {
-              console.error("Error updating punches:", err);
-              return;
-            }
-            console.log(
-              `Updated punches for ref ${referredBy}: ${referralPunches}`,
-            );
-          },
-        );
-        if (!row) {
+          const newBonusPunches = parseInt(row.bonusPunches) + referralPunches;
           console.log(
-            `Adding new referrer ${referredBy} with punches ${referralPunches}`,
+            `Updating bonus punches for referrer ${referredBy} by ${referralPunches}`,
+          );
+
+          db.run(
+            `UPDATE wallet_data SET bonusPunches = ? WHERE wallet_address = ?`,
+            [newBonusPunches, referredBy],
+            (err) => {
+              if (err) {
+                console.error("Error updating bonus punches:", err);
+                return;
+              }
+              console.log(
+                `Updated bonus punches for referrer ${referredBy}: ${newBonusPunches}`,
+              );
+            },
+          );
+        } else {
+          console.log(
+            `Adding new referrer ${referredBy} with bonus punches ${referralPunches}`,
           );
           db.run(
-            `INSERT INTO wallet_data (wallet_address, tokens, punches, referredBy, characterName) VALUES (?, ?, ?, ?, ?)`,
-            [referredBy, 0, referralPunches, referredBy, ""],
+            `INSERT INTO wallet_data (wallet_address, tokens, punches, bonusPunches, referredBy, characterName) VALUES (?, ?, ?, ?, ?, ?)`,
+            [referredBy, 0, 0, referralPunches, "", ""],
             (err) => {
               if (err) {
                 console.error("Error adding referredBy:", err);
                 return;
               }
               console.log(`Added referredBy ${referredBy} to the database`);
+            },
+          );
+        }
+
+        // Self-referral case
+        if (referredBy === walletAddress) {
+          console.log(
+            `Self-referral detected for ${walletAddress}, adding ${referralPunches} to their bonus punches`,
+          );
+
+          db.run(
+            `UPDATE wallet_data SET bonusPunches = bonusPunches + ? WHERE wallet_address = ?`,
+            [referralPunches, walletAddress],
+            (err) => {
+              if (err) {
+                console.error(
+                  "Error updating self-referral bonus punches:",
+                  err,
+                );
+                return;
+              }
+              console.log(
+                `Self-referral bonus punches updated for ${walletAddress}`,
+              );
             },
           );
         }
