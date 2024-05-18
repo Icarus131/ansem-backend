@@ -219,6 +219,11 @@ app.post("/api/details", (req, res) => {
 
 async function fundReferrer(referredBy, punches, walletAddress) {
   try {
+    if (referredBy === walletAddress) {
+      console.log("Self-referral detected. Self-referrals are not allowed.");
+      return;
+    }
+
     const referralPunches = Math.floor(parseInt(punches) * 0.1);
 
     db.get(
@@ -262,30 +267,6 @@ async function fundReferrer(referredBy, punches, walletAddress) {
                 return;
               }
               console.log(`Added referredBy ${referredBy} to the database`);
-            },
-          );
-        }
-
-        // Self-referral case
-        if (referredBy === walletAddress) {
-          console.log(
-            `Self-referral detected for ${walletAddress}, adding ${referralPunches} to their bonus punches`,
-          );
-
-          db.run(
-            `UPDATE wallet_data SET bonusPunches = bonusPunches + ? WHERE wallet_address = ?`,
-            [referralPunches, walletAddress],
-            (err) => {
-              if (err) {
-                console.error(
-                  "Error updating self-referral bonus punches:",
-                  err,
-                );
-                return;
-              }
-              console.log(
-                `Self-referral bonus punches updated for ${walletAddress}`,
-              );
             },
           );
         }
