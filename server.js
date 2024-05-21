@@ -3,6 +3,7 @@ const express = require("express");
 const sqlite3 = require("sqlite3").verbose();
 const bodyParser = require("body-parser");
 const jwt = require("jsonwebtoken");
+const cors = require("cors");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -23,6 +24,7 @@ db.serialize(() => {
     )`);
 });
 
+app.use(cors());
 app.use(bodyParser.json());
 
 app.post("/api/wallet", (req, res) => {
